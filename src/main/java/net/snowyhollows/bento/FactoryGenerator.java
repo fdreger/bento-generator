@@ -22,8 +22,9 @@ import java.util.Set;
 
 public class FactoryGenerator extends AbstractProcessor {
 
-    private final static ClassName BENTO_FACTORY = ClassName.get(BentoFactory.class.getPackage().getName(), BentoFactory.class.getSimpleName());
-    private final static ClassName STRING = ClassName.get("java.lang", "String");
+    private final static ClassName BENTO_FACTORY = ClassName.get(BentoFactory.class);
+    private final static ClassName STRING = ClassName.get(String.class);
+    private final static ClassName BENTO = ClassName.get(Bento.class);
 
     private Filer filer;
     private Messager messager;
@@ -106,7 +107,11 @@ public class FactoryGenerator extends AbstractProcessor {
 
                 } else {
                     if (byFactory == null) {
-                        createInContext.addCode("bento.get($T.IT)", factoryNameFor((ClassName) ClassName.get(tm), "Factory"));
+                        if (typeName.equals(BENTO)) {
+                            createInContext.addCode("bento");
+                        } else {
+                            createInContext.addCode("bento.get($T.IT)", factoryNameFor((ClassName) ClassName.get(tm), "Factory"));
+                        }
                     } else {
                         TypeMirror typeMirror = getT(byFactory);
                         TypeElement element = (TypeElement)types.asElement(typeMirror);
