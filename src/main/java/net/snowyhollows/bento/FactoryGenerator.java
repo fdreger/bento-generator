@@ -3,9 +3,11 @@ package net.snowyhollows.bento;
 import com.squareup.javapoet.*;
 import net.snowyhollows.bento2.Bento;
 import net.snowyhollows.bento2.BentoFactory;
+import net.snowyhollows.bento2.BentoResettable;
 import net.snowyhollows.bento2.annotation.ByFactory;
 import net.snowyhollows.bento2.annotation.ByName;
 import net.snowyhollows.bento2.annotation.DefaultFactory;
+import net.snowyhollows.bento2.annotation.Reset;
 import net.snowyhollows.bento2.annotation.WithFactory;
 
 import javax.annotation.processing.*;
@@ -18,11 +20,13 @@ import javax.lang.model.util.Types;
 import javax.tools.Diagnostic;
 import java.io.IOException;
 import java.util.Collections;
+import java.util.List;
 import java.util.Set;
 
 public class FactoryGenerator extends AbstractProcessor {
 
     private final static ClassName BENTO_FACTORY = ClassName.get(BentoFactory.class);
+    private final static ClassName BENTO_RESETTABLE = ClassName.get(BentoResettable.class);
     private final static ClassName STRING = ClassName.get(String.class);
     private final static ClassName BENTO = ClassName.get(Bento.class);
 
@@ -50,6 +54,14 @@ public class FactoryGenerator extends AbstractProcessor {
             messager.printMessage(Diagnostic.Kind.NOTE, "generating " + bean);
             ExecutableElement constructor = (ExecutableElement) bean;
             TypeElement beanClass = (TypeElement) constructor.getEnclosingElement();
+	        ExecutableElement resetter = null;
+
+	        for (Element enclosedElement : beanClass.getEnclosedElements()) {
+		        if (enclosedElement.getAnnotation(Reset.class) != null) {
+		        	resetter = (ExecutableElement) enclosedElement;
+		        }
+	        }
+
             ClassName beanClassName = ClassName.get(beanClass);
 
             String suffix = constructor.getAnnotation(WithFactory.class).value();
@@ -65,74 +77,29 @@ public class FactoryGenerator extends AbstractProcessor {
                     .returns(beanClassName)
                     .addCode("return new $T(", beanClassName);
 
-            boolean first = true;
-            for (VariableElement param : constructor.getParameters()) {
-                TypeMirror tm = param.asType();
+	        List<? extends VariableElement> parameters = constructor.getParameters();
+	        writeGettingParametersFromBento(createInContext, parameters);
+	        createInContext.addCode(");\n");
 
-                if (!first) {
-                    createInContext.addCode(", ");
-                }
+	        MethodSpec.Builder reset = MethodSpec.methodBuilder("reset")
+			        .addParameter(ParameterSpec.builder(Bento.class, "bento").build())
+			        .addModifiers(Modifier.PUBLIC)
+			        .returns(TypeName.VOID);
 
-                ByName byName = param.getAnnotation(ByName.class);
-                ByFactory byFactory = param.getAnnotation(ByFactory.class);
-
-                TypeName typeName = TypeName.get(tm);
-                boolean isEnum = !typeName.isPrimitive() && types.asElement(tm).getKind() == ElementKind.ENUM;
-                boolean isByName = byName != null || typeName.isPrimitive() || typeName.equals(STRING) || isEnum;
-
-                if (isByName) {
-                    String nameToGet = (byName == null || byName.value().equals("##")) ?
-                            param.getSimpleName().toString()
-                            : byName.value();
-
-                    String call = null;
-                    if (typeName.equals(TypeName.FLOAT)) {
-                        call = "bento.getFloat($S)";
-                    } else if (typeName.equals(TypeName.INT)) {
-                        call = "bento.getInt($S)";
-                    } else if (typeName.equals(TypeName.BOOLEAN)) {
-                        call = "bento.getBoolean($S)";
-                    } else if (typeName.equals(STRING)) {
-                        call = "bento.getString($S)";
-                    } else if (isEnum) {
-                        call = "bento.getEnum($T.class, $S)";
-                    } else {
-                        call = "bento.get($S)";
-                    }
-                    if (!isEnum) {
-                        createInContext.addCode(call, nameToGet);
-                    } else {
-                        createInContext.addCode(call, ClassName.get(tm), nameToGet);
-                    }
-
-                } else {
-                    if (byFactory == null) {
-                        if (typeName.equals(BENTO)) {
-                            createInContext.addCode("bento");
-                        } else {
-                            createInContext.addCode("bento.get($T.IT)", factoryNameFor((ClassName) ClassName.get(tm), "Factory"));
-                        }
-                    } else {
-                        TypeMirror typeMirror = getT(byFactory);
-                        TypeElement element = (TypeElement)types.asElement(typeMirror);
-                        if (!element.getQualifiedName().toString().equals(DefaultFactory.class.getCanonicalName())) {
-                            createInContext.addCode("bento.get($T.IT)", ClassName.get(element));
-                        } else {
-                            createInContext.addCode("bento.get($T.IT)", factoryNameFor((ClassName) ClassName.get(tm), "Factory"));
-                        }
-                    }
-                }
-
-                first = false;
-            }
-
-            createInContext.addCode(");\n");
+	        if (resetter != null) {
+		        List<? extends VariableElement> resetParameters = resetter.getParameters();
+		        reset.addCode("this." + resetter.getSimpleName() + "(");
+		        writeGettingParametersFromBento(reset, resetParameters );
+		        createInContext.addCode(");\n");
+	        }
 
             TypeSpec.Builder factory = TypeSpec.enumBuilder(factoryName)
                     .addModifiers(Modifier.PUBLIC)
                     .addEnumConstant("IT")
                     .addSuperinterface(bentoFactoryParametrized)
-                    .addMethod(createInContext.build());
+		            .addSuperinterface(BENTO_RESETTABLE)
+                    .addMethod(createInContext.build())
+                    .addMethod(reset.build());
 
             try {
                 JavaFile.builder(packageName, factory.build()).build().writeTo(filer);
@@ -143,7 +110,70 @@ public class FactoryGenerator extends AbstractProcessor {
         return true;
     }
 
-    private static TypeMirror getT(ByFactory byFactory) {
+	private void writeGettingParametersFromBento(MethodSpec.Builder source, List<? extends VariableElement> parameters) {
+		boolean first = true;
+		for (VariableElement param : parameters) {
+	        TypeMirror tm = param.asType();
+
+	        if (!first) {
+	            source.addCode(", ");
+	        }
+
+	        ByName byName = param.getAnnotation(ByName.class);
+	        ByFactory byFactory = param.getAnnotation(ByFactory.class);
+
+	        TypeName typeName = TypeName.get(tm);
+	        boolean isEnum = !typeName.isPrimitive() && types.asElement(tm).getKind() == ElementKind.ENUM;
+	        boolean isByName = byName != null || typeName.isPrimitive() || typeName.equals(STRING) || isEnum;
+
+	        if (isByName) {
+	            String nameToGet = (byName == null || byName.value().equals("##")) ?
+	                    param.getSimpleName().toString()
+	                    : byName.value();
+
+	            String call = null;
+	            if (typeName.equals(TypeName.FLOAT)) {
+	                call = "bento.getFloat($S)";
+	            } else if (typeName.equals(TypeName.INT)) {
+	                call = "bento.getInt($S)";
+	            } else if (typeName.equals(TypeName.BOOLEAN)) {
+	                call = "bento.getBoolean($S)";
+	            } else if (typeName.equals(STRING)) {
+	                call = "bento.getString($S)";
+	            } else if (isEnum) {
+	                call = "bento.getEnum($T.class, $S)";
+	            } else {
+	                call = "bento.get($S)";
+	            }
+	            if (!isEnum) {
+	                source.addCode(call, nameToGet);
+	            } else {
+	                source.addCode(call, ClassName.get(tm), nameToGet);
+	            }
+
+	        } else {
+	            if (byFactory == null) {
+	                if (typeName.equals(BENTO)) {
+	                    source.addCode("bento");
+	                } else {
+	                    source.addCode("bento.get($T.IT)", factoryNameFor((ClassName) ClassName.get(tm), "Factory"));
+	                }
+	            } else {
+	                TypeMirror typeMirror = getT(byFactory);
+	                TypeElement element = (TypeElement)types.asElement(typeMirror);
+	                if (!element.getQualifiedName().toString().equals(DefaultFactory.class.getCanonicalName())) {
+	                    source.addCode("bento.get($T.IT)", ClassName.get(element));
+	                } else {
+	                    source.addCode("bento.get($T.IT)", factoryNameFor((ClassName) ClassName.get(tm), "Factory"));
+	                }
+	            }
+	        }
+
+	        first = false;
+	    }
+	}
+
+	private static TypeMirror getT(ByFactory byFactory) {
         try
         {
             byFactory.value();
