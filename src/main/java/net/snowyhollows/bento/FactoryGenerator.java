@@ -70,6 +70,7 @@ public class FactoryGenerator extends AbstractProcessor {
             String packageName = beanClassName.packageName();
 
             ParameterizedTypeName bentoFactoryParametrized = ParameterizedTypeName.get(BENTO_FACTORY, beanClassName);
+            ParameterizedTypeName bentoRessetableParametrized = ParameterizedTypeName.get(BENTO_RESETTABLE, beanClassName);
 
             MethodSpec.Builder createInContext = MethodSpec.methodBuilder("createInContext")
                     .addParameter(ParameterSpec.builder(Bento.class, "bento").build())
@@ -82,22 +83,23 @@ public class FactoryGenerator extends AbstractProcessor {
 	        createInContext.addCode(");\n");
 
 	        MethodSpec.Builder reset = MethodSpec.methodBuilder("reset")
+                    .addParameter(ParameterSpec.builder(beanClassName, "t").build())
 			        .addParameter(ParameterSpec.builder(Bento.class, "bento").build())
 			        .addModifiers(Modifier.PUBLIC)
 			        .returns(TypeName.VOID);
 
 	        if (resetter != null) {
 		        List<? extends VariableElement> resetParameters = resetter.getParameters();
-		        reset.addCode("this." + resetter.getSimpleName() + "(");
+		        reset.addCode("t." + resetter.getSimpleName() + "(");
 		        writeGettingParametersFromBento(reset, resetParameters );
-		        createInContext.addCode(");\n");
+		        reset.addCode(");\n");
 	        }
 
             TypeSpec.Builder factory = TypeSpec.enumBuilder(factoryName)
                     .addModifiers(Modifier.PUBLIC)
                     .addEnumConstant("IT")
                     .addSuperinterface(bentoFactoryParametrized)
-		            .addSuperinterface(BENTO_RESETTABLE)
+		            .addSuperinterface(bentoRessetableParametrized)
                     .addMethod(createInContext.build())
                     .addMethod(reset.build());
 
