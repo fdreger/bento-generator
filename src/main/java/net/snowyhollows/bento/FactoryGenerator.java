@@ -4,18 +4,13 @@ import com.squareup.javapoet.*;
 import net.snowyhollows.bento2.Bento;
 import net.snowyhollows.bento2.BentoFactory;
 import net.snowyhollows.bento2.BentoResettable;
-import net.snowyhollows.bento2.annotation.ByFactory;
-import net.snowyhollows.bento2.annotation.ByName;
-import net.snowyhollows.bento2.annotation.DefaultFactory;
-import net.snowyhollows.bento2.annotation.Reset;
-import net.snowyhollows.bento2.annotation.WithFactory;
+import net.snowyhollows.bento2.annotation.*;
 
 import javax.annotation.processing.*;
 import javax.lang.model.SourceVersion;
 import javax.lang.model.element.*;
 import javax.lang.model.type.MirroredTypeException;
 import javax.lang.model.type.TypeMirror;
-import javax.lang.model.util.Elements;
 import javax.lang.model.util.Types;
 import javax.tools.Diagnostic;
 import java.io.IOException;
@@ -99,9 +94,13 @@ public class FactoryGenerator extends AbstractProcessor {
                     .addModifiers(Modifier.PUBLIC)
                     .addEnumConstant("IT")
                     .addSuperinterface(bentoFactoryParametrized)
-		            .addSuperinterface(bentoRessetableParametrized)
-                    .addMethod(createInContext.build())
-                    .addMethod(reset.build());
+                    .addMethod(createInContext.build());
+
+	        if (resetter != null) {
+	            factory
+                        .addSuperinterface(bentoRessetableParametrized)
+                        .addMethod(reset.build());
+            }
 
             try {
                 JavaFile.builder(packageName, factory.build()).build().writeTo(filer);
