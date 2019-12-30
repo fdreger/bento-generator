@@ -37,7 +37,7 @@ public class FactoryGenerator extends AbstractProcessor {
         types = processingEnvironment.getTypeUtils();
     }
 
-    private ClassName factoryNameFor(ClassName type, String suffix) {
+    static ClassName factoryNameFor(ClassName type, String suffix) {
         return ClassName.get(type.packageName(), type.simpleName() + suffix);
     }
 
